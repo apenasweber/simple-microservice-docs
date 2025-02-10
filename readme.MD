@@ -109,22 +109,23 @@ Containerizing the microservice guarantees consistent environments from developm
 -   **Security:** Run containers as non-root, implement vulnerability scanning, and sign images.
 
 ### 3.2 Sample Dockerfile
-# Build Stage
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
 
-# Runtime Stage
-FROM node:18-alpine
-WORKDIR /app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
-RUN npm ci --only=production --production
-EXPOSE 3000
-CMD ["node", "dist/index.js"]
+    # Build Stage
+    FROM node:18-alpine AS builder
+    WORKDIR /app
+    COPY package*.json ./
+    RUN npm ci --only=production
+    COPY . .
+    RUN npm run build
+    
+    # Runtime Stage
+    FROM node:18-alpine
+    WORKDIR /app
+    COPY --from=builder /app/dist ./dist
+    COPY --from=builder /app/package*.json ./
+    RUN npm ci --only=production --production
+    EXPOSE 3000
+    CMD ["node", "dist/index.js"]
 
 _Explanation:_
 -   The multi-stage build minimizes the final image size by excluding build tools.
@@ -144,200 +145,211 @@ Deploy the containerized microservice to a Kubernetes cluster (using a managed s
 ### 4.2 Sample Kubernetes Manifests
 
 #### Deployment YAML
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: data-microservice
-  labels:
-    app: data-microservice
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: data-microservice
-  template:
+
+    apiVersion: apps/v1
+    kind: Deployment
     metadata:
+      name: data-microservice
       labels:
         app: data-microservice
     spec:
-      containers:
-      - name: data-microservice
-        image: your-registry/data-microservice:latest
-        ports:
-        - containerPort: 3000
-        envFrom:
-        - configMapRef:
-            name: data-microservice-config
-        - secretRef:
-            name: data-microservice-secrets
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 15
-          periodSeconds: 20
+      replicas: 3
+      selector:
+        matchLabels:
+          app: data-microservice
+      template:
+        metadata:
+          labels:
+            app: data-microservice
+        spec:
+          containers:
+          - name: data-microservice
+            image: your-registry/data-microservice:latest
+            ports:
+            - containerPort: 3000
+            envFrom:
+            - configMapRef:
+                name: data-microservice-config
+            - secretRef:
+                name: data-microservice-secrets
+            readinessProbe:
+              httpGet:
+                path: /health
+                port: 3000
+              initialDelaySeconds: 5
+              periodSeconds: 10
+            livenessProbe:
+              httpGet:
+                path: /health
+                port: 3000
+              initialDelaySeconds: 15
+              periodSeconds: 20
+
 #### Service YAML
-apiVersion: v1
-kind: Service
-metadata:
-  name: data-microservice-svc
-spec:
-  type: LoadBalancer
-  selector:
-    app: data-microservice
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 3000
+
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: data-microservice-svc
+    spec:
+      type: LoadBalancer
+      selector:
+        app: data-microservice
+      ports:
+        - protocol: TCP
+          port: 80
+          targetPort: 3000
 
 #### ConfigMap YAML
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: data-microservice-config
-data:
-  NODE_ENV: production
-  DB_CONNECTION_STRING: "mongodb://your-mongo-db:27017/datadb"
+
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: data-microservice-config
+    data:
+      NODE_ENV: production
+      DB_CONNECTION_STRING: "mongodb://your-mongo-db:27017/datadb"
 
 _Scalability Consideration:_ Horizontal Pod Autoscaling can be added by monitoring custom metrics to maintain the sub-500ms response time even under high load.
 
-4.3 ASCII Diagram: Kubernetes Deployment
-          +------------------------------+
-          |   Ingress / API Gateway      |
-          +--------------+---------------+
-                         |
-             +-----------v-----------+
-             |    Service (LoadBalancer)    |
-             +-----------+-----------+
-                         |
-              +----------v----------+
-              |    Deployment       |
-              |  (ReplicaSet: 3 pods) |
-              +----------+----------+
-                         |
-       +-----------------+-----------------+
-       |       |         |         |       |
-       v       v         v         v       v
-   [Pod1]  [Pod2]   [Pod3]   ... (autoscaled)  
+### 4.3 ASCII Diagram: Kubernetes Deployment
+              +------------------------------+
+              |   Ingress / API Gateway      |
+              +--------------+---------------+
+                             |
+                 +-----------v-----------+
+                 |    Service (LoadBalancer)    |
+                 +-----------+-----------+
+                             |
+                  +----------v----------+
+                  |    Deployment       |
+                  |  (ReplicaSet: 3 pods) |
+                  +----------+----------+
+                             |
+           +-----------------+-----------------+
+           |       |         |         |       |
+           v       v         v         v       v
+       [Pod1]  [Pod2]   [Pod3]   ... (autoscaled)  
+
 _Explanation:_  
 The Ingress routes external traffic to the Service, which forwards requests to the pods managed by the Deployment. Horizontal autoscaling ensures additional pods are spun up as needed.
 
-5. CI/CD Pipeline
-5.1 Pipeline Overview
+## 5. CI/CD Pipeline
+
+### 5.1 Pipeline Overview
+
 A robust CI/CD pipeline automates code integration, testing, container image building, and Kubernetes deployment. Key steps include:
 
-Code Integration: Run linting and unit tests.
-Build Stage: Build the Docker image using the Dockerfile.
-Push Stage: Push the image to a container registry.
-Deployment Stage: Apply Kubernetes manifests to update the cluster.
-Monitoring: Automated health checks and rollback strategies.
+1.  **Code Integration:** Run linting and unit tests.
+2.  **Build Stage:** Build the Docker image using the Dockerfile.
+3.  **Push Stage:** Push the image to a container registry.
+4.  **Deployment Stage:** Apply Kubernetes manifests to update the cluster.
+5.  **Monitoring:** Automated health checks and rollback strategies.
 
-5.2 Sample GitHub Actions Workflow
-name: CI/CD Pipeline
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-
-    - name: Install dependencies and run tests
-      run: |
-        npm ci
-        npm test
-
-    - name: Build Docker image
-      run: |
-        docker build -t your-registry/data-microservice:latest .
-
-    - name: Login to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-
-    - name: Push Docker image
-      run: |
-        docker push your-registry/data-microservice:latest
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'latest'
-
-    - name: Deploy to Kubernetes
-      run: |
-        kubectl apply -f k8s/deployment.yaml
-        kubectl apply -f k8s/service.yaml
+### 5.2 Sample GitHub Actions Workflow
+    name: CI/CD Pipeline
+    
+    on:
+      push:
+        branches: [ main ]
+      pull_request:
+        branches: [ main ]
+    
+    jobs:
+      build:
+        runs-on: ubuntu-latest
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
+    
+        - name: Setup Node.js
+          uses: actions/setup-node@v3
+          with:
+            node-version: '18'
+    
+        - name: Install dependencies and run tests
+          run: |
+            npm ci
+            npm test
+    
+        - name: Build Docker image
+          run: |
+            docker build -t your-registry/data-microservice:latest .
+    
+        - name: Login to Docker Hub
+          uses: docker/login-action@v2
+          with:
+            username: ${{ secrets.DOCKER_USERNAME }}
+            password: ${{ secrets.DOCKER_PASSWORD }}
+    
+        - name: Push Docker image
+          run: |
+            docker push your-registry/data-microservice:latest
+    
+      deploy:
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
+    
+        - name: Set up kubectl
+          uses: azure/setup-kubectl@v3
+          with:
+            version: 'latest'
+    
+        - name: Deploy to Kubernetes
+          run: |
+            kubectl apply -f k8s/deployment.yaml
+            kubectl apply -f k8s/service.yaml
 
 _Explanation:_  
 This workflow uses GitHub Actions to automate testing, Docker image build/push, and deployment to a Kubernetes cluster.
 
-6. Testing Strategy
-6.1 Testing Levels
-Unit Tests:
+## 6. Testing Strategy
+### 6.1 Testing Levels
+**Unit Tests:**
 Test individual functions and modules in isolation (e.g., JSON validation logic, business rules).
 Coverage Goal: Aim for 80–90% coverage on critical components.
 
-Integration Tests:
+**Integration Tests:**
 Test interactions between the API layer, service layer, and database (using a staging database or mocks).
 Coverage Goal: Cover all critical service interactions and API endpoints.
 
-Performance Tests:
+**Performance Tests:**
 Validate that API endpoints respond within 500ms under expected load using tools such as JMeter or k6.
 
-6.2 Test Pyramid Diagram (ASCII)
-          +---------------------+
-          |   End-to-End Tests  |
-          +---------------------+
-                  ^
-          +---------------------+
-          | Integration Tests   |
-          +---------------------+
-                  ^
-          +---------------------+
-          |    Unit Tests       |
-          +---------------------+
+### 6.2 Test Pyramid Diagram (ASCII)
+
+      +---------------------+
+      |   End-to-End Tests  |
+      +---------------------+
+              ^
+      +---------------------+
+      | Integration Tests   |
+      +---------------------+
+              ^
+      +---------------------+
+      |    Unit Tests       |
+      +---------------------+
+
 _Explanation:_  
 Emphasize a large suite of fast unit tests, a moderate number of integration tests, and a few end-to-end tests for full system validation.
 
-                                     7. Future Roadmap & Optimizations
-Caching:
-Implement caching strategies (e.g., Redis) to reduce database load and improve response times.
 
-Service Mesh Integration:
-Evaluate using a service mesh (e.g., Istio) for better inter-service communication, traffic management, and enhanced security.
+## 7. Future Roadmap & Optimizations
 
-Cost Analysis:
-Conduct an in-depth cost analysis for cloud deployment on AWS, Azure, or Google Cloud, focusing on auto-scaling, managed Kubernetes services, and container registries.
-
-Enhanced Observability:
-Integrate distributed tracing (using Jaeger or Zipkin) and advanced monitoring (Prometheus, Grafana) to quickly diagnose performance issues.
-
-Security Enhancements:
-Regular vulnerability scanning and adopting best practices for container and API security, as practiced by companies like Capital One and Netflix.
+-   **Caching:**  
+    Implement caching strategies (e.g., Redis) to reduce database load and improve response times.
+    
+-   **Service Mesh Integration:**  
+    Evaluate using a service mesh (e.g., Istio) for better inter-service communication, traffic management, and enhanced security.
+    
+-   **Cost Analysis:**  
+    Conduct an in-depth cost analysis for cloud deployment on AWS, Azure, or Google Cloud, focusing on auto-scaling, managed Kubernetes services, and container registries.
+    
+-   **Enhanced Observability:**  
+    Integrate distributed tracing (using Jaeger or Zipkin) and advanced monitoring (Prometheus, Grafana) to quickly diagnose performance issues.
+    
+-   **Security Enhancements:**  
+    Regular vulnerability scanning and adopting best practices for container and API security, as practiced by companies like Capital One and Netflix.
